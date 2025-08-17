@@ -20,6 +20,7 @@ src/lexiclass_worker/
 ├── core/                 # Core components
 │   ├── base.py          # Base classes and protocols
 │   ├── config.py        # Configuration management
+│   ├── queue_config.py  # Shared queue configuration
 │   └── storage.py       # Storage backend interface
 ├── tasks/               # Task implementations
 │   ├── train.py         # Model training task
@@ -165,6 +166,42 @@ Backup volumes:
 ```bash
 docker run --rm -v ml_data:/data -v $(pwd):/backup alpine tar czf /backup/ml_data.tar.gz /data
 ```
+
+## Queue Configuration
+
+The worker uses dedicated queues for different types of tasks with priority support. The queue configuration is shared between the worker and API services through `lexiclass_worker.core.queue_config`:
+
+```python
+from lexiclass_worker.core.queue_config import TASK_QUEUES, TASK_ROUTES
+
+# Available queues with priority support
+TASK_QUEUES = {
+    'indexing': {
+        'routing_key': 'indexing',
+        'queue_arguments': {'x-max-priority': 10}
+    },
+    'training': {
+        'routing_key': 'training',
+        'queue_arguments': {'x-max-priority': 10}
+    },
+    'prediction': {
+        'routing_key': 'prediction',
+        'queue_arguments': {'x-max-priority': 10}
+    }
+}
+
+# Task routing configuration
+TASK_ROUTES = {
+    'lexiclass_worker.tasks.index_documents_task': {'queue': 'indexing'},
+    'lexiclass_worker.tasks.train_model_task': {'queue': 'training'},
+    'lexiclass_worker.tasks.predict_documents_task': {'queue': 'prediction'}
+}
+```
+
+This configuration ensures that:
+- Each task type has a dedicated queue
+- Tasks can be prioritized (0-10, higher is more important)
+- Task routing is consistent across services
 
 ## Task Types
 

@@ -7,6 +7,7 @@ from celery.signals import after_setup_logger, after_setup_task_logger
 
 from .core.config import get_settings
 from .core.logging import setup_logging
+from .core.queue_config import QUEUE_CONFIGS, TASK_QUEUES, TASK_ROUTES
 
 # Load settings
 settings = get_settings()
@@ -28,17 +29,19 @@ app.conf.update(
     task_track_started=True,
     task_time_limit=settings.celery.task_time_limit,
     worker_prefetch_multiplier=settings.celery.worker_prefetch_multiplier,
-    task_routes={
-        "lexiclass_worker.tasks.*": {"queue": "ml_tasks"}
-    },
-    # Add task-specific settings
+    task_queues=TASK_QUEUES,
+    task_routes=TASK_ROUTES,
+    # Add task-specific settings from queue configs
     task_annotations={
-        "*": {
+        f"lexiclass_worker.tasks.{queue.name}_task": {
+            "rate_limit": queue.rate_limit,
             "retry_backoff": True,  # Enable exponential backoff
-            "retry_backoff_max": 600,  # Max delay between retries (10 minutes)
+            "retry_backoff_max": queue.retry_policy["interval_max"],
             "retry_jitter": True,  # Add random jitter to retry delays
-            "max_retries": 3,  # Maximum number of retries
-        }
+            "max_retries": queue.retry_policy["max_retries"],
+            "retry_delay": queue.retry_policy["interval_start"],
+            "retry_kwargs": {"max_delay": queue.retry_policy["interval_max"]},
+        } for queue in QUEUE_CONFIGS.values()
     },
     # Add result settings
     task_ignore_result=False,  # We want to store task results
