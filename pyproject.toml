@@ -11,6 +11,7 @@ dependencies = [
     "lexiclass @ git+https://github.com/arafat-hasan/LexiClass.git",
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
+    "pydantic-settings>=2.1.0",
 ]
 requires-python = ">=3.9"
 

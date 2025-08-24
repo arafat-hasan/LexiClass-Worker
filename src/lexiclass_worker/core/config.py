@@ -9,8 +9,10 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class CeleryConfig(BaseModel):
+class CeleryConfig(BaseSettings):
     """Celery-specific configuration."""
+    model_config = SettingsConfigDict(env_prefix="LEXICLASS_CELERY_")
+
     broker_url: str = Field(
         default="redis://localhost:6379/0",
         description="URL for the Celery message broker"
@@ -29,8 +31,10 @@ class CeleryConfig(BaseModel):
     )
 
 
-class StorageConfig(BaseModel):
+class StorageConfig(BaseSettings):
     """Storage configuration for models and indexes."""
+    model_config = SettingsConfigDict(env_prefix="LEXICLASS_STORAGE_")
+
     base_path: Path = Field(
         default=Path("/tmp/lexiclass"),
         description="Base path for storing models and indexes"

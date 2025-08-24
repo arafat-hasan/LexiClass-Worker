@@ -4,10 +4,14 @@ from pathlib import Path
 
 from celery import Celery
 from celery.signals import after_setup_logger, after_setup_task_logger
+from dotenv import load_dotenv
 
 from .core.config import get_settings
 from .core.logging import setup_logging
 from .core.queue_config import QUEUE_CONFIGS, TASK_QUEUES, TASK_ROUTES
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Load settings
 settings = get_settings()
