@@ -31,7 +31,7 @@ class IndexDocumentsOutput(TaskOutput):
 class IndexDocumentsTask(MLTaskBase):
     """Task for building document indexes."""
 
-    name = "lexiclass_worker.tasks.index_documents_task"
+    name = "lexiclass_worker.tasks.index.index_documents_task"
 
     @property
     def input_schema(self) -> type[TaskInput]:
