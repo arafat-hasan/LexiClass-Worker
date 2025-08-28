@@ -50,12 +50,16 @@ class MLTaskBase(Task, ABC):
 
     def validate_input(self, input_data: Dict[str, Any]) -> TaskInput:
         """Validate task input data using the task's input schema."""
+        print("DEBUG: Validating input data:", input_data)
+        print("DEBUG: Using schema:", self.input_schema)
         try:
             return self.input_schema(**input_data)
         except ValidationError as e:
+            error_details = {"validation_errors": e.errors()}
+            print("DEBUG: Validation error details:", error_details)
             raise TaskValidationError(
                 "Invalid task input",
-                details={"validation_errors": e.errors()},
+                details=error_details,
             )
 
     def validate_output(self, output_data: Dict[str, Any]) -> TaskOutput:

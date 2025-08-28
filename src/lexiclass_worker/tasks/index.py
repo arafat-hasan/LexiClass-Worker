@@ -54,8 +54,15 @@ def index_documents_task(self, **kwargs) -> dict:
     Returns:
         Dict containing indexing results
     """
+    # Debug input
+    print("DEBUG: Received task kwargs:", kwargs)
+    
     # Validate input
-    input_data = self.validate_input(kwargs)
+    try:
+        input_data = self.validate_input(kwargs)
+    except Exception as e:
+        print("DEBUG: Validation error details:", str(e))
+        raise
     settings = get_settings()
 
     # Get storage paths
