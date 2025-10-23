@@ -8,10 +8,13 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Get the project root directory (3 levels up from this file)
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
 
-class CeleryConfig(BaseSettings):
+
+class CeleryConfig(BaseModel):
     """Celery-specific configuration."""
-    model_config = SettingsConfigDict(env_prefix="LEXICLASS_CELERY_")
 
     broker_url: str = Field(
         default="redis://localhost:6379/0",
@@ -31,9 +34,8 @@ class CeleryConfig(BaseSettings):
     )
 
 
-class StorageConfig(BaseSettings):
+class StorageConfig(BaseModel):
     """Storage configuration for models and indexes."""
-    model_config = SettingsConfigDict(env_prefix="LEXICLASS_STORAGE_")
 
     base_path: Path = Field(
         default=Path("/tmp/lexiclass"),
@@ -53,8 +55,9 @@ class Settings(BaseSettings):
     """Global settings for the worker service."""
     model_config = SettingsConfigDict(
         env_prefix="LEXICLASS_",
-        env_file=".env",
+        env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
+        env_nested_delimiter="__",
         extra="ignore"
     )
 
@@ -80,8 +83,8 @@ class Settings(BaseSettings):
         """Get the path for storing model files."""
         return (
             self.storage.base_path
-            / self.storage.models_dir
             / project_id
+            / self.storage.models_dir
             / "model.pkl"
         )
 
@@ -89,8 +92,8 @@ class Settings(BaseSettings):
         """Get the path for storing index files."""
         return (
             self.storage.base_path
-            / self.storage.indexes_dir
             / project_id
+            / self.storage.indexes_dir
             / "index"
         )
 

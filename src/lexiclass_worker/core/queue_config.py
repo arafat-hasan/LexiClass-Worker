@@ -66,8 +66,8 @@ QUEUE_CONFIGS = {
 
 # Task routing patterns
 TASK_INDEXING = 'lexiclass_worker.tasks.index.index_documents_task'
-TASK_TRAINING = 'lexiclass_worker.tasks.train.train_model_task'
-TASK_PREDICTION = 'lexiclass_worker.tasks.predict.predict_documents_task'
+TASK_TRAINING = 'lexiclass_worker.tasks.train_model_task'
+TASK_PREDICTION = 'lexiclass_worker.tasks.predict_documents_task'
 
 # Convert queue configs to Celery task_queues format
 TASK_QUEUES = {

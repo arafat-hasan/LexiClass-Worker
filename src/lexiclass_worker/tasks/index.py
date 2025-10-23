@@ -14,7 +14,7 @@ from ..core.config import get_settings
 class IndexDocumentsInput(TaskInput):
     """Input schema for document indexing task."""
     project_id: str = Field(..., description="Unique project identifier")
-    documents_path: Path = Field(..., description="Directory containing document files")
+    documents_path: str = Field(..., description="Directory containing document files")
     is_incremental: bool = Field(
         default=False,
         description="Whether to update existing index"
@@ -23,8 +23,8 @@ class IndexDocumentsInput(TaskInput):
 
 class IndexDocumentsOutput(TaskOutput):
     """Output schema for document indexing task."""
-    index_path: str
-    is_incremental: bool
+    index_path: Optional[str] = None
+    is_incremental: Optional[bool] = None
     num_documents: Optional[int] = None
 
 
@@ -67,25 +67,19 @@ def index_documents_task(self, **kwargs) -> dict:
 
     # Get storage paths
     index_path = settings.get_index_path(input_data.project_id)
+    documents_path = Path(input_data.documents_path)
 
     def stream_factory():
-        return DocumentLoader.iter_documents_from_directory(input_data.documents_path)
+        return DocumentLoader.iter_documents_from_directory(str(documents_path))
 
     # Count documents for reporting
     num_documents = sum(1 for _ in stream_factory())
 
-    if input_data.is_incremental and self._classifier is not None:
-        # Update existing index
-        self.classifier.update_index(
-            index_path=index_path,
-            document_stream_factory=stream_factory,
-        )
-    else:
-        # Build new index
-        self.classifier.build_index(
-            index_path=index_path,
-            document_stream_factory=stream_factory,
-        )
+    # Build new index (incremental updates not yet supported)
+    self.classifier.build_index(
+        index_path=str(index_path),
+        document_stream_factory=stream_factory,
+    )
 
     # Prepare and validate output
     output_data = {
@@ -95,4 +89,5 @@ def index_documents_task(self, **kwargs) -> dict:
         "is_incremental": input_data.is_incremental,
         "num_documents": num_documents,
     }
-    return self.validate_output(output_data)
+    validated_output = self.validate_output(output_data)
+    return validated_output.model_dump()

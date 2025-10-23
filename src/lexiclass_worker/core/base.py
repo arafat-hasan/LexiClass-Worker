@@ -103,19 +103,20 @@ class MLTaskBase(Task, ABC):
             extra={
                 "error_code": error_code,
                 "error_details": error_details,
-                "args": args,
-                "kwargs": kwargs,
+                "task_args": args,
+                "task_kwargs": kwargs,
             },
             exc_info=einfo,
         )
 
-        return self.validate_output({
+        validated_output = self.validate_output({
             "status": "failed",
             "project_id": kwargs.get("project_id", "unknown"),
             "error": str(exc),
             "error_code": error_code,
             "error_details": error_details,
         })
+        return validated_output.model_dump()
 
     def on_success(self, retval, task_id, args, kwargs):
         """Handle task success with structured logging."""

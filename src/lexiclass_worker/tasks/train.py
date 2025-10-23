@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from lexiclass.io import DocumentLoader
+from lexiclass.io import DocumentLoader, load_labels
 from pydantic import Field
 
 from ..celery import app
@@ -15,7 +15,7 @@ from ..core.exceptions import DocumentError, ModelError
 class TrainModelInput(TaskInput):
     """Input schema for model training task."""
     project_id: str = Field(..., description="Unique project identifier")
-    labels_path: Path = Field(..., description="Path to labels TSV file")
+    labels_path: str = Field(..., description="Path to labels TSV file")
     document_ids: Optional[List[str]] = Field(
         default=None,
         description="Optional list of document IDs to train on"
@@ -24,8 +24,8 @@ class TrainModelInput(TaskInput):
 
 class TrainModelOutput(TaskOutput):
     """Output schema for model training task."""
-    model_path: str
-    num_labels: int
+    model_path: Optional[str] = None
+    num_labels: Optional[int] = None
     metrics: Optional[Dict] = None
 
 
@@ -72,7 +72,7 @@ def train_model_task(self, **kwargs) -> dict:
 
         # Load labels and train
         try:
-            labels = DocumentLoader.load_labels(input_data.labels_path)
+            labels = load_labels(input_data.labels_path)
         except Exception as e:
             raise DocumentError(
                 "Failed to load labels",
@@ -123,7 +123,8 @@ def train_model_task(self, **kwargs) -> dict:
             "num_labels": len(labels),
             "metrics": metrics,
         }
-        return self.validate_output(output_data)
+        validated_output = self.validate_output(output_data)
+        return validated_output.model_dump()
 
     except Exception as e:
         logger.exception("Unexpected error during training")

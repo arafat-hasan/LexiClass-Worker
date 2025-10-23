@@ -22,8 +22,8 @@ class PredictDocumentsInput(TaskInput):
 
 class PredictDocumentsOutput(TaskOutput):
     """Output schema for document prediction task."""
-    predictions: Dict[str, tuple[str, float]]
-    num_documents: int
+    predictions: Optional[Dict[str, tuple[str, float]]] = None
+    num_documents: Optional[int] = None
 
 
 class PredictDocumentsTask(MLTaskBase):
@@ -62,11 +62,18 @@ def predict_documents_task(self, **kwargs) -> dict:
     # Load model and index
     self.classifier.load_model(model_path, index_path=index_path)
 
-    # Get documents to predict
+    # Get the documents directory from settings
+    # The documents should be in the same location as specified in the API
+    documents_dir = settings.storage.base_path / "documents" / input_data.project_id
+
+    # Load all documents
+    all_docs = DocumentLoader.load_documents_from_directory(str(documents_dir))
+
+    # Filter by document_ids if specified
     if input_data.document_ids:
-        docs = DocumentLoader.load_documents_by_ids(index_path, input_data.document_ids)
+        docs = {k: v for k, v in all_docs.items() if k in input_data.document_ids}
     else:
-        docs = DocumentLoader.load_documents_from_index(index_path)
+        docs = all_docs
 
     # Run prediction
     predictions = self.classifier.predict(docs)
@@ -78,4 +85,5 @@ def predict_documents_task(self, **kwargs) -> dict:
         "predictions": predictions,
         "num_documents": len(docs),
     }
-    return self.validate_output(output_data)
+    validated_output = self.validate_output(output_data)
+    return validated_output.model_dump()
