@@ -1,5 +1,6 @@
 """Indexing task implementation."""
 
+import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -9,6 +10,7 @@ from pydantic import Field
 from ..celery import app
 from ..core.base import MLTaskBase, TaskInput, TaskOutput
 from ..core.config import get_settings
+from ..core.database import IndexStatus, update_document_status, get_document_ids_by_project
 
 
 class IndexDocumentsInput(TaskInput):
@@ -80,6 +82,30 @@ def index_documents_task(self, **kwargs) -> dict:
         index_path=str(index_path),
         document_stream_factory=stream_factory,
     )
+
+    # Update document statuses in database
+    try:
+        # Create new event loop for async operations
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # Get all document IDs for this project
+            document_ids = loop.run_until_complete(get_document_ids_by_project(input_data.project_id))
+
+            # Update all documents to 'indexed' status
+            loop.run_until_complete(
+                update_document_status(
+                    project_id=input_data.project_id,
+                    document_ids=document_ids,
+                    status=IndexStatus.INDEXED
+                )
+            )
+            print(f"Updated {len(document_ids)} documents to 'indexed' status")
+        finally:
+            loop.close()
+    except Exception as e:
+        print(f"Warning: Failed to update document statuses: {e}")
+        # Continue even if status update fails - indexing was successful
 
     # Prepare and validate output
     output_data = {

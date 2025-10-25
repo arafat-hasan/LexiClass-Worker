@@ -68,10 +68,12 @@ QUEUE_CONFIGS = {
 TASK_INDEXING = 'lexiclass_worker.tasks.index.index_documents_task'
 TASK_TRAINING = 'lexiclass_worker.tasks.train_model_task'
 TASK_PREDICTION = 'lexiclass_worker.tasks.predict_documents_task'
+TASK_FIELD_TRAINING = 'lexiclass_worker.tasks.field_train.train_field_model_task'
+TASK_FIELD_PREDICTION = 'lexiclass_worker.tasks.field_predict.predict_field_documents_task'
 
 # Convert queue configs to Celery task_queues format
 TASK_QUEUES = {
-    queue.name: {
+    queue.name.value: {  # Use .value to get string from enum
         'routing_key': queue.routing_key,
         'queue_arguments': queue.queue_arguments,
         'rate_limit': queue.rate_limit,
@@ -80,7 +82,9 @@ TASK_QUEUES = {
 
 # Task routing configuration
 TASK_ROUTES = {
-    TASK_INDEXING: {'queue': QueueName.INDEXING},
-    TASK_TRAINING: {'queue': QueueName.TRAINING},
-    TASK_PREDICTION: {'queue': QueueName.PREDICTION}
+    TASK_INDEXING: {'queue': QueueName.INDEXING.value},  # Use .value to get string from enum
+    TASK_TRAINING: {'queue': QueueName.TRAINING.value},
+    TASK_PREDICTION: {'queue': QueueName.PREDICTION.value},
+    TASK_FIELD_TRAINING: {'queue': QueueName.TRAINING.value},
+    TASK_FIELD_PREDICTION: {'queue': QueueName.PREDICTION.value},
 }

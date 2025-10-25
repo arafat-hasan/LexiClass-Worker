@@ -75,21 +75,54 @@ class Settings(BaseSettings):
         description="Logging format (json or text)"
     )
 
+    # Database configuration
+    database_uri: str = Field(
+        default="postgresql+asyncpg://lexiclass:lexiclass@localhost/lexiclass",
+        description="Database connection URI"
+    )
+
     # Component configurations
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
 
-    def get_model_path(self, project_id: str) -> Path:
-        """Get the path for storing model files."""
-        return (
-            self.storage.base_path
-            / project_id
-            / self.storage.models_dir
-            / "model.pkl"
-        )
+    @property
+    def DATABASE_URI(self) -> str:
+        """Get database URI (for compatibility with API)."""
+        return self.database_uri
+
+    def get_model_path(self, project_id: str, field_id: Optional[str] = None) -> Path:
+        """Get the path for storing model files.
+
+        Args:
+            project_id: Project ID
+            field_id: Optional field ID for field-specific models
+
+        Returns:
+            Path to model file
+        """
+        if field_id:
+            # Field-specific model path
+            return (
+                self.storage.base_path
+                / project_id
+                / self.storage.models_dir
+                / field_id
+                / "model.pkl"
+            )
+        else:
+            # Legacy path for backward compatibility
+            return (
+                self.storage.base_path
+                / project_id
+                / self.storage.models_dir
+                / "model.pkl"
+            )
 
     def get_index_path(self, project_id: str) -> Path:
-        """Get the path for storing index files."""
+        """Get the path for storing index files.
+
+        Note: Index is shared across all fields in a project.
+        """
         return (
             self.storage.base_path
             / project_id
