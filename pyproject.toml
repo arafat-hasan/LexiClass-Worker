@@ -9,7 +9,11 @@ dependencies = [
     "celery>=5.3.0",
     "redis>=5.0.0",
     "lexiclass @ git+https://github.com/arafat-hasan/LexiClass.git",
-    "lexiclass-api @ git+https://github.com/arafat-hasan/LexiClass-API.git",
+    # Use a relative file reference for the local sibling package. The previous
+    # `file:///../LexiClass-Core` resolved to `/LexiClass-Core` (absolute)
+    # which caused the OSError when that path didn't exist. A relative file
+    # reference keeps this portable for local development.
+    "lexiclass-core @ file:../LexiClass-Core",
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.1.0",

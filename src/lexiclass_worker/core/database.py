@@ -7,8 +7,8 @@ from typing import List, AsyncGenerator
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-# Import models from API - single source of truth
-from lexiclass_api.models import Base, Document, IndexStatus
+# Import models from Core - single source of truth
+from lexiclass_core.models import Base, Document, IndexStatus
 
 from .config import get_settings
 

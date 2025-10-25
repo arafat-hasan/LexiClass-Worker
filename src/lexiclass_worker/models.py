@@ -1,11 +1,11 @@
-"""Database models - imported from LexiClass API repository.
+"""Database models - imported from LexiClass Core repository.
 
-This module re-exports models from the API to maintain single source of truth.
-The API owns all database model definitions.
+This module re-exports models from the Core package to maintain single source of truth.
+The Core package owns all database model definitions.
 """
 
-# Import all models from the API
-from lexiclass_api.models import (
+# Import all models from the Core package
+from lexiclass_core.models import (
     Base,
     Document,
     DocumentLabel,
