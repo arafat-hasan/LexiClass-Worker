@@ -19,7 +19,7 @@ class StorageBackend(Protocol):
         """Load model and associated index files."""
         ...
 
-    def delete_model(self, project_id: str) -> bool:
+    def delete_model(self, project_id: int) -> bool:
         """Delete model and associated files."""
         ...
 
@@ -50,7 +50,7 @@ class LocalStorageBackend:
         """Check if model and index files exist."""
         return model_path.exists() and index_path.exists()
 
-    def delete_model(self, project_id: str) -> bool:
+    def delete_model(self, project_id: int) -> bool:
         """Delete model and associated files."""
         try:
             from .config import get_settings

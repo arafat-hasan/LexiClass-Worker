@@ -1,11 +1,12 @@
 """Field-level prediction task implementation."""
 
 import asyncio
+import gzip
+import json
 import logging
 import pickle
 from pathlib import Path
 from typing import Dict, List, Optional
-from uuid import uuid4
 
 from pydantic import Field as PydanticField
 
@@ -20,18 +21,18 @@ logger = logging.getLogger(__name__)
 class PredictFieldDocumentsInput(TaskInput):
     """Input schema for field document prediction task."""
 
-    field_id: str = PydanticField(..., description="Field ID to use for prediction")
-    project_id: str = PydanticField(..., description="Project ID")
-    document_ids: List[str] = PydanticField(..., description="Document IDs to predict")
+    field_id: int = PydanticField(..., description="Field ID to use for prediction")
+    project_id: int = PydanticField(..., description="Project ID")
+    document_ids: List[int] = PydanticField(..., description="Document IDs to predict")
 
 
 class PredictFieldDocumentsOutput(TaskOutput):
     """Output schema for field document prediction task."""
 
-    field_id: str
+    field_id: int
     predictions_created: Optional[int] = None
     total_documents: int
-    model_id: Optional[str] = None
+    model_version: Optional[int] = None
 
 
 class PredictFieldDocumentsTask(MLTaskBase):
@@ -49,9 +50,9 @@ class PredictFieldDocumentsTask(MLTaskBase):
 
 
 async def _predict_field_documents_async(
-    field_id: str,
-    project_id: str,
-    document_ids: List[str]
+    field_id: int,
+    project_id: int,
+    document_ids: List[int]
 ) -> dict:
     """Predict documents using a field's model (async implementation)."""
     from lexiclass.io import DocumentLoader
@@ -83,11 +84,11 @@ async def _predict_field_documents_async(
         if not model:
             raise ValueError(f"No ready model found for field {field_id}")
 
-        logger.info(f"Using model version {model.version} ({model.id})")
+        logger.info(f"Using model version {model.version} (ID: {model.id})")
 
-        # Load model and vectorizer
-        model_path = settings.storage.base_path / model.model_path
-        vectorizer_path = settings.storage.base_path / model.vectorizer_path
+        # Load model and vectorizer using dynamic path generation
+        model_path = model.get_model_path(settings.storage.base_path, project_id)
+        vectorizer_path = model.get_vectorizer_path(settings.storage.base_path, project_id)
 
         if not model_path.exists():
             raise ValueError(f"Model file not found: {model_path}")
@@ -108,7 +109,7 @@ async def _predict_field_documents_async(
         class_name_to_id = {cls.name: cls.id for cls in classes}
 
         # Load documents
-        documents_dir = settings.storage.base_path / project_id / "documents"
+        documents_dir = settings.storage.base_path / str(project_id) / "documents"
         all_docs = DocumentLoader.load_documents_from_directory(str(documents_dir))
 
         # Filter requested documents
@@ -139,6 +140,30 @@ async def _predict_field_documents_async(
         else:
             confidences = [1.0] * len(predicted_classes)
 
+        # Store prediction scores to disk
+        from ..models import Prediction as PredictionModel
+
+        predictions_path = PredictionModel.get_prediction_scores_path(
+            settings.storage.base_path, project_id, field_id, model.version
+        )
+        predictions_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write all prediction scores to JSONL file
+        with open(predictions_path, 'w', encoding='utf-8') as f:
+            for doc_id, predicted_class, confidence in zip(doc_ids, predicted_classes, confidences):
+                class_id = class_name_to_id.get(predicted_class)
+                if class_id:
+                    score_entry = {
+                        "document_id": doc_id,
+                        "predicted_class": predicted_class,
+                        "class_id": class_id,
+                        "confidence": float(confidence),
+                        "model_version": model.version,
+                    }
+                    f.write(json.dumps(score_entry) + '\n')
+
+        logger.info(f"Saved prediction scores to {predictions_path}")
+
         # Delete existing predictions for these documents and field
         await session.execute(
             delete(Prediction)
@@ -146,20 +171,18 @@ async def _predict_field_documents_async(
             .where(Prediction.document_id.in_(document_ids))
         )
 
-        # Create new predictions
+        # Create new predictions (only latest per document per field)
         predictions_created = 0
         for doc_id, predicted_class, confidence in zip(doc_ids, predicted_classes, confidences):
             class_id = class_name_to_id.get(predicted_class)
             if class_id:
                 prediction = Prediction(
-                    id=str(uuid4()),
                     document_id=doc_id,
                     field_id=field_id,
-                    model_id=model.id,
                     class_id=class_id,
+                    model_version=model.version,
                     confidence=float(confidence),
                     pred_metadata={
-                        "model_version": model.version,
                         "predicted_class": predicted_class,
                     },
                 )
@@ -174,7 +197,7 @@ async def _predict_field_documents_async(
             "status": "completed",
             "project_id": project_id,
             "field_id": field_id,
-            "model_id": model.id,
+            "model_version": model.version,
             "predictions_created": predictions_created,
             "total_documents": len(document_ids),
         }

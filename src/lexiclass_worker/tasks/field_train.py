@@ -6,7 +6,6 @@ import pickle
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
-from uuid import uuid4
 
 from pydantic import Field as PydanticField
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -25,14 +24,14 @@ logger = logging.getLogger(__name__)
 class TrainFieldModelInput(TaskInput):
     """Input schema for field model training task."""
 
-    field_id: str = PydanticField(..., description="Field ID to train")
-    project_id: str = PydanticField(..., description="Project ID")
+    field_id: int = PydanticField(..., description="Field ID to train")
+    project_id: int = PydanticField(..., description="Project ID")
 
 
 class TrainFieldModelOutput(TaskOutput):
     """Output schema for field model training task."""
 
-    model_id: Optional[str] = None
+    model_id: Optional[int] = None
     model_version: Optional[int] = None
     metrics: Optional[Dict] = None
 
@@ -51,7 +50,7 @@ class TrainFieldModelTask(MLTaskBase):
         return TrainFieldModelOutput
 
 
-async def _train_field_model_async(field_id: str, project_id: str) -> dict:
+async def _train_field_model_async(field_id: int, project_id: int) -> dict:
     """Train a model for a specific field (async implementation)."""
     from lexiclass.io import DocumentLoader
 
@@ -105,15 +104,9 @@ async def _train_field_model_async(field_id: str, project_id: str) -> dict:
         # Create model record with TRAINING status
         from ..models import ModelStatus
 
-        model_path_rel = f"{project_id}/models/{field_id}/v{new_version}/model.pkl"
-        vectorizer_path_rel = f"{project_id}/models/{field_id}/v{new_version}/vectorizer.pkl"
-
         new_model = Model(
-            id=str(uuid4()),
             field_id=field_id,
             version=new_version,
-            model_path=model_path_rel,
-            vectorizer_path=vectorizer_path_rel,
             status=ModelStatus.TRAINING,
         )
         session.add(new_model)
@@ -124,7 +117,7 @@ async def _train_field_model_async(field_id: str, project_id: str) -> dict:
 
         try:
             # Load document contents
-            documents_dir = settings.storage.base_path / project_id / "documents"
+            documents_dir = settings.storage.base_path / str(project_id) / "documents"
             all_docs = DocumentLoader.load_documents_from_directory(str(documents_dir))
 
             # Prepare training data
@@ -174,9 +167,9 @@ async def _train_field_model_async(field_id: str, project_id: str) -> dict:
                 "num_classes": len(set(labels_list)),
             }
 
-            # Save model files
-            model_path = settings.storage.base_path / model_path_rel
-            vectorizer_path = settings.storage.base_path / vectorizer_path_rel
+            # Save model files using dynamic path generation
+            model_path = new_model.get_model_path(settings.storage.base_path, project_id)
+            vectorizer_path = new_model.get_vectorizer_path(settings.storage.base_path, project_id)
 
             model_path.parent.mkdir(parents=True, exist_ok=True)
             vectorizer_path.parent.mkdir(parents=True, exist_ok=True)

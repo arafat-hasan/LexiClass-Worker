@@ -1,59 +1,28 @@
-"""Database connection and utilities for the worker."""
+"""Database connection and utilities for the worker - uses Core's session factory."""
 
 import logging
-from contextlib import asynccontextmanager
-from typing import List, AsyncGenerator
+from typing import List
 
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Import models from Core - single source of truth
-from lexiclass_core.models import Base, Document, IndexStatus
+from lexiclass_core.models import Document, IndexStatus
+from lexiclass_core.db.session import get_db_session, init_db
 
 from .config import get_settings
 
 logger = logging.getLogger(__name__)
 
 
-# Create database engine
-def get_engine():
-    """Get database engine."""
+def initialize_database() -> None:
+    """Initialize database connection using Core's session factory."""
     settings = get_settings()
-    return create_async_engine(
-        str(settings.DATABASE_URI),
-        echo=False,
-        pool_pre_ping=True,
-    )
-
-
-# Create session factory
-def get_session_factory():
-    """Get session factory."""
-    engine = get_engine()
-    return async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-
-@asynccontextmanager
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get database session context manager."""
-    session_factory = get_session_factory()
-    async with session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+    init_db(str(settings.DATABASE_URI))
 
 
 async def update_document_status(
-    project_id: str,
+    project_id: int,
     document_ids: List[str],
     status: IndexStatus
 ) -> None:
@@ -84,7 +53,7 @@ async def update_document_status(
         raise
 
 
-async def get_document_ids_by_project(project_id: str) -> List[str]:
+async def get_document_ids_by_project(project_id: int) -> List[str]:
     """Get all document IDs for a project.
 
     Args:

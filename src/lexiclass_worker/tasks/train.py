@@ -14,7 +14,7 @@ from ..core.exceptions import DocumentError, ModelError
 
 class TrainModelInput(TaskInput):
     """Input schema for model training task."""
-    project_id: str = Field(..., description="Unique project identifier")
+    project_id: int = Field(..., description="Unique project identifier")
     labels_path: str = Field(..., description="Path to labels TSV file")
     document_ids: Optional[List[str]] = Field(
         default=None,

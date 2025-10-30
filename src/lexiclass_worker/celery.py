@@ -10,7 +10,9 @@ import redis
 
 from .core.config import get_settings
 from .core.logging import setup_logging
-from .core.queue_config import QUEUE_CONFIGS, TASK_QUEUES, TASK_ROUTES
+from .core.database import initialize_database
+# Import queue configuration from Core - single source of truth
+from lexiclass_core.queue_config import QUEUE_CONFIGS, TASK_QUEUES, TASK_ROUTES
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +144,13 @@ def check_connections(**kwargs):
     logger.info("=" * 60)
     logger.info("Checking service connections...")
     logger.info("=" * 60)
+
+    # Initialize database using Core's session factory
+    try:
+        initialize_database()
+        logger.info("✓ Database initialized using Core session factory")
+    except Exception as e:
+        logger.error(f"✗ Database initialization failed: {e}")
 
     # Check Redis broker connection
     broker_connected = check_redis_connection(settings.celery.broker_url, "broker")

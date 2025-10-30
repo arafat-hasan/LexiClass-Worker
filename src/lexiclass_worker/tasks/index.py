@@ -15,7 +15,7 @@ from ..core.database import IndexStatus, update_document_status, get_document_id
 
 class IndexDocumentsInput(TaskInput):
     """Input schema for document indexing task."""
-    project_id: str = Field(..., description="Unique project identifier")
+    project_id: int = Field(..., description="Unique project identifier")
     documents_path: str = Field(..., description="Directory containing document files")
     is_incremental: bool = Field(
         default=False,

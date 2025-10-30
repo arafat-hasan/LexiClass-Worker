@@ -22,7 +22,7 @@ class TaskOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: str
-    project_id: str
+    project_id: int
     error: Optional[str] = None
     error_code: Optional[str] = None
     error_details: Optional[Dict[str, Any]] = None
@@ -37,7 +37,7 @@ class MLTaskBase(Task, ABC):
     def __init__(self):
         self.logger = logging.getLogger(f"lexiclass_worker.task.{self.name}")
 
-    def get_task_logger(self, task_id: str, project_id: Optional[str] = None) -> logging.Logger:
+    def get_task_logger(self, task_id: str, project_id: Optional[int] = None) -> logging.Logger:
         """Get a logger with task context."""
         return get_task_logger(task_id, project_id)
 

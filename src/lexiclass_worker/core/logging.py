@@ -51,7 +51,7 @@ class JSONFormatter(logging.Formatter):
 class TaskContextFilter(logging.Filter):
     """Filter that adds task context to log records."""
 
-    def __init__(self, task_id: Optional[str] = None, project_id: Optional[str] = None):
+    def __init__(self, task_id: Optional[str] = None, project_id: Optional[int] = None):
         super().__init__()
         self.task_id = task_id
         self.project_id = project_id
@@ -101,7 +101,7 @@ def setup_logging() -> None:
     logger.setLevel(settings.log_level)
 
 
-def get_task_logger(task_id: str, project_id: Optional[str] = None) -> logging.Logger:
+def get_task_logger(task_id: str, project_id: Optional[int] = None) -> logging.Logger:
     """Get a logger with task context."""
     logger = logging.getLogger(f"lexiclass_worker.task.{task_id}")
     logger.addFilter(TaskContextFilter(task_id, project_id))

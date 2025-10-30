@@ -13,7 +13,7 @@ from ..core.config import get_settings
 
 class PredictDocumentsInput(TaskInput):
     """Input schema for document prediction task."""
-    project_id: str = Field(..., description="Unique project identifier")
+    project_id: int = Field(..., description="Unique project identifier")
     document_ids: Optional[List[str]] = Field(
         default=None,
         description="Optional list of specific document IDs to predict"
