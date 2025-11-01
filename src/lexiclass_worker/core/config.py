@@ -74,6 +74,10 @@ class Settings(BaseSettings):
         default="json",
         description="Logging format (json or text)"
     )
+    default_locale: str = Field(
+        default="en",
+        description="Default locale for ICU tokenization"
+    )
 
     # Database configuration
     database_uri: str = Field(

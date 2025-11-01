@@ -2,16 +2,11 @@
 
 import asyncio
 import logging
-import pickle
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
 from pydantic import Field as PydanticField
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import SGDClassifier
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from sklearn.model_selection import train_test_split
 
 from ..celery import app
 from ..core.base import MLTaskBase, TaskInput, TaskOutput
@@ -53,11 +48,11 @@ class TrainFieldModelTask(MLTaskBase):
 async def _train_field_model_async(field_id: int, project_id: int) -> dict:
     """Train a model for a specific field (async implementation)."""
     from lexiclass.io import DocumentLoader
+    from lexiclass.training import TextClassificationPipeline
 
     settings = get_settings()
 
     # Import API models dynamically to access database
-    # We'll need to add these to the worker
     from ..models import Field, FieldClass, DocumentLabel, Model, Document
 
     async with get_db_session() as session:
@@ -71,7 +66,7 @@ async def _train_field_model_async(field_id: int, project_id: int) -> dict:
 
         logger.info(f"Starting training for field: {field.name} ({field_id})")
 
-        # Get training labels
+        # Get training labels - ONLY those marked as training data
         result = await session.execute(
             select(DocumentLabel)
             .where(DocumentLabel.field_id == field_id)
@@ -80,9 +75,12 @@ async def _train_field_model_async(field_id: int, project_id: int) -> dict:
         labels = result.scalars().all()
 
         if not labels:
-            raise ValueError(f"No training labels found for field {field_id}")
+            raise ValueError(
+                f"No training labels found for field {field_id}. "
+                f"Please ensure documents are labeled with is_training_data=True."
+            )
 
-        logger.info(f"Found {len(labels)} training labels")
+        logger.info(f"Found {len(labels)} training labels (is_training_data=True)")
 
         # Get field classes
         result = await session.execute(
@@ -120,72 +118,105 @@ async def _train_field_model_async(field_id: int, project_id: int) -> dict:
             documents_dir = settings.storage.base_path / str(project_id) / "documents"
             all_docs = DocumentLoader.load_documents_from_directory(str(documents_dir))
 
+            logger.info(
+                f"Found {len(all_docs)} documents in storage at {documents_dir}, "
+                f"{len(labels)} labels in database"
+            )
+
             # Prepare training data
             texts = []
             labels_list = []
+            missing_docs = []
+            missing_classes = []
+            matched_docs = []
 
             for label in labels:
                 class_name = class_map.get(label.class_id)
-                if class_name and label.document_id in all_docs:
-                    texts.append(all_docs[label.document_id])
-                    labels_list.append(class_name)
+
+                if not class_name:
+                    missing_classes.append(label.class_id)
+                    continue
+
+                # DocumentLoader returns dict with STRING keys, but document_id is INTEGER
+                # Convert document_id to string for lookup
+                doc_key = str(label.document_id)
+
+                if doc_key not in all_docs:
+                    missing_docs.append(label.document_id)
+                    logger.debug(
+                        f"Document ID {label.document_id} (looking for key '{doc_key}') "
+                        f"not found in storage"
+                    )
+                    continue
+
+                texts.append(all_docs[doc_key])
+                labels_list.append(class_name)
+                matched_docs.append(label.document_id)
+
+            # Log matching results
+            logger.info(
+                f"Document matching results: "
+                f"{len(matched_docs)} successfully matched, "
+                f"{len(missing_docs)} missing from storage, "
+                f"{len(missing_classes)} with missing classes"
+            )
+
+            # Log diagnostics if documents are missing
+            if missing_docs:
+                logger.warning(
+                    f"Missing {len(missing_docs)} document files for labeled documents. "
+                    f"Document IDs: {missing_docs[:10]}{'...' if len(missing_docs) > 10 else ''}"
+                )
+
+            if missing_classes:
+                logger.warning(
+                    f"Missing {len(missing_classes)} class definitions. "
+                    f"Class IDs: {missing_classes[:10]}{'...' if len(missing_classes) > 10 else ''}"
+                )
 
             if len(texts) < 2:
-                raise ValueError("Need at least 2 labeled documents for training")
+                error_details = []
+                error_details.append(f"Found {len(labels)} labels in database")
+                error_details.append(f"Found {len(all_docs)} documents in storage")
+                error_details.append(f"Successfully matched {len(texts)} documents with labels")
 
-            logger.info(f"Training with {len(texts)} documents, {len(set(labels_list))} classes")
+                if missing_docs:
+                    error_details.append(
+                        f"{len(missing_docs)} labels have no corresponding document files in storage"
+                    )
+                if missing_classes:
+                    error_details.append(
+                        f"{len(missing_classes)} labels reference missing classes"
+                    )
 
-            # Train vectorizer and classifier
-            vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1, 2))
-            X = vectorizer.fit_transform(texts)
-
-            # Split data for evaluation
-            if len(texts) >= 4:
-                X_train, X_test, y_train, y_test = train_test_split(
-                    X, labels_list, test_size=0.2, random_state=42, stratify=labels_list
+                error_msg = (
+                    f"Need at least 2 labeled documents with valid files for training. "
+                    + " | ".join(error_details) + ". "
+                    f"Please ensure documents are indexed before training."
                 )
-            else:
-                X_train, X_test, y_train, y_test = X, X, labels_list, labels_list
+                raise ValueError(error_msg)
 
-            # Train classifier
-            classifier = SGDClassifier(
-                loss='log_loss',
-                penalty='l2',
-                max_iter=1000,
-                random_state=42
+            # Use Lexiclass training pipeline
+            logger.info(f"Initializing TextClassificationPipeline...")
+            pipeline = TextClassificationPipeline(
+                locale=settings.default_locale,
             )
-            classifier.fit(X_train, y_train)
 
-            # Evaluate
-            y_pred = classifier.predict(X_test)
-            metrics = {
-                "accuracy": float(accuracy_score(y_test, y_pred)),
-                "f1_score": float(f1_score(y_test, y_pred, average='weighted', zero_division=0)),
-                "precision": float(precision_score(y_test, y_pred, average='weighted', zero_division=0)),
-                "recall": float(recall_score(y_test, y_pred, average='weighted', zero_division=0)),
-                "training_samples": len(texts),
-                "num_classes": len(set(labels_list)),
-            }
+            # Train the pipeline (includes tokenization, feature extraction, and classifier training)
+            logger.info(f"Training pipeline on {len(texts)} documents with {len(set(labels_list))} classes...")
+            training_stats = pipeline.fit(texts, labels_list)
 
             # Save model files using dynamic path generation
             model_path = new_model.get_model_path(settings.storage.base_path, project_id)
             vectorizer_path = new_model.get_vectorizer_path(settings.storage.base_path, project_id)
 
-            model_path.parent.mkdir(parents=True, exist_ok=True)
-            vectorizer_path.parent.mkdir(parents=True, exist_ok=True)
-
-            with open(model_path, 'wb') as f:
-                pickle.dump(classifier, f)
-
-            with open(vectorizer_path, 'wb') as f:
-                pickle.dump(vectorizer, f)
-
-            logger.info(f"Saved model to {model_path}")
+            logger.info(f"Saving model to {model_path}")
+            pipeline.save(model_path, vectorizer_path)
 
             # Update model status
             new_model.status = ModelStatus.READY
-            new_model.accuracy = metrics["accuracy"]
-            new_model.metrics = metrics
+            new_model.accuracy = None  # No accuracy metrics during training (evaluation is separate)
+            new_model.metrics = training_stats  # Store training statistics
             new_model.trained_at = datetime.utcnow()
 
             await session.commit()
@@ -197,7 +228,7 @@ async def _train_field_model_async(field_id: int, project_id: int) -> dict:
                 "project_id": project_id,
                 "model_id": model_id,
                 "model_version": new_version,
-                "metrics": metrics,
+                "training_stats": training_stats,
             }
 
         except Exception as e:
@@ -219,8 +250,18 @@ def train_field_model_task(self, **kwargs) -> dict:
     Returns:
         Task result with training statistics
     """
+    from ..core.database import ensure_db_initialized
+
     # Validate input
     input_data = self.validate_input(kwargs)
+
+    logger.info(
+        f"Starting training task for field_id={input_data.field_id}, "
+        f"project_id={input_data.project_id}"
+    )
+
+    # Ensure database is initialized (uses our new safety check)
+    ensure_db_initialized()
 
     # Run async function in event loop
     loop = asyncio.new_event_loop()

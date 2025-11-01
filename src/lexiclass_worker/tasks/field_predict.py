@@ -58,6 +58,7 @@ async def _predict_field_documents_async(
     from lexiclass.io import DocumentLoader
 
     settings = get_settings()
+
     from ..models import Field, FieldClass, Model, Prediction, ModelStatus
     from sqlalchemy import select, delete
 
@@ -215,6 +216,9 @@ def predict_field_documents_task(self, **kwargs) -> dict:
     Returns:
         Task result with prediction statistics
     """
+    from lexiclass_core.db.session import AsyncSessionFactory
+    from ..core.database import initialize_database
+
     # Validate input
     input_data = self.validate_input(kwargs)
 
@@ -222,6 +226,12 @@ def predict_field_documents_task(self, **kwargs) -> dict:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
+        # Initialize database in this event loop context
+        # This ensures database connections are bound to the same loop we're using
+        if AsyncSessionFactory is None:
+            logger.info("Initializing database in task event loop...")
+            initialize_database()
+
         result = loop.run_until_complete(
             _predict_field_documents_async(
                 input_data.field_id,

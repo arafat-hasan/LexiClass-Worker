@@ -4,13 +4,12 @@ import logging
 from pathlib import Path
 
 from celery import Celery
-from celery.signals import after_setup_logger, after_setup_task_logger, worker_ready
+from celery.signals import after_setup_logger, after_setup_task_logger, worker_ready, worker_process_init
 from dotenv import load_dotenv
 import redis
 
 from .core.config import get_settings
 from .core.logging import setup_logging
-from .core.database import initialize_database
 # Import queue configuration from Core - single source of truth
 from lexiclass_core.queue_config import QUEUE_CONFIGS, TASK_QUEUES, TASK_ROUTES
 
@@ -72,6 +71,31 @@ def setup_celery_logging(*args, **kwargs):
 
 # Auto-discover tasks
 app.autodiscover_tasks(["lexiclass_worker.tasks"])
+
+
+@worker_process_init.connect
+def init_worker_process(**kwargs):
+    """Initialize worker process - runs once per worker process.
+
+    This runs in each worker process (if using prefork pool) before any tasks are executed.
+    We initialize the database session factory here so it's ready for all tasks.
+    """
+    logger.info("Initializing worker process...")
+
+    # Initialize database connection
+    # This creates the AsyncSessionFactory which will be used by all tasks
+    try:
+        from .core.database import initialize_database
+        initialize_database()
+        logger.info("✓ Database session factory initialized successfully")
+    except Exception as e:
+        logger.error(
+            f"✗ Failed to initialize database: {str(e)}",
+            exc_info=True,
+            extra={"error": str(e), "status": "initialization_failed"}
+        )
+        # Don't raise - let tasks handle database errors individually
+        # This allows worker to start even if DB is temporarily unavailable
 
 
 def check_redis_connection(redis_url: str, connection_type: str) -> bool:
@@ -145,12 +169,24 @@ def check_connections(**kwargs):
     logger.info("Checking service connections...")
     logger.info("=" * 60)
 
-    # Initialize database using Core's session factory
+    # Check database connection
     try:
-        initialize_database()
-        logger.info("✓ Database initialized using Core session factory")
+        from lexiclass_core.db.session import AsyncSessionFactory
+        if AsyncSessionFactory is not None:
+            logger.info(
+                "✓ Database session factory initialized",
+                extra={"status": "ready", "database": str(settings.DATABASE_URI).split('@')[-1]}
+            )
+        else:
+            logger.warning(
+                "⚠ Database session factory not initialized - tasks may fail",
+                extra={"status": "not_initialized"}
+            )
     except Exception as e:
-        logger.error(f"✗ Database initialization failed: {e}")
+        logger.error(
+            f"✗ Database check failed: {str(e)}",
+            extra={"status": "error", "error": str(e)}
+        )
 
     # Check Redis broker connection
     broker_connected = check_redis_connection(settings.celery.broker_url, "broker")
