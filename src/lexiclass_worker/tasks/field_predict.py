@@ -24,6 +24,18 @@ class PredictFieldDocumentsInput(TaskInput):
     field_id: int = PydanticField(..., description="Field ID to use for prediction")
     project_id: int = PydanticField(..., description="Project ID")
     document_ids: List[int] = PydanticField(..., description="Document IDs to predict")
+    tokenizer: str = PydanticField(
+        default="icu",
+        description="Tokenizer plugin name (must match training)"
+    )
+    feature_extractor: str = PydanticField(
+        default="bow",
+        description="Feature extractor plugin name (must match training)"
+    )
+    locale: str = PydanticField(
+        default="en",
+        description="Locale for tokenization (must match training)"
+    )
 
 
 class PredictFieldDocumentsOutput(TaskOutput):
@@ -52,10 +64,14 @@ class PredictFieldDocumentsTask(MLTaskBase):
 async def _predict_field_documents_async(
     field_id: int,
     project_id: int,
-    document_ids: List[int]
+    document_ids: List[int],
+    tokenizer: str = "icu",
+    feature_extractor: str = "bow",
+    locale: str = "en"
 ) -> dict:
     """Predict documents using a field's model (async implementation)."""
     from lexiclass.io import DocumentLoader
+    from lexiclass.plugins import registry
 
     settings = get_settings()
 
@@ -87,7 +103,7 @@ async def _predict_field_documents_async(
 
         logger.info(f"Using model version {model.version} (ID: {model.id})")
 
-        # Load model and vectorizer using dynamic path generation
+        # Load model and vectorizer using LexiClass plugins
         model_path = model.get_model_path(settings.storage.base_path, project_id)
         vectorizer_path = model.get_vectorizer_path(settings.storage.base_path, project_id)
 
@@ -96,11 +112,23 @@ async def _predict_field_documents_async(
         if not vectorizer_path.exists():
             raise ValueError(f"Vectorizer file not found: {vectorizer_path}")
 
-        with open(model_path, 'rb') as f:
-            classifier = pickle.load(f)
+        logger.info(
+            f"Loading plugins: tokenizer={tokenizer}, "
+            f"feature_extractor={feature_extractor}"
+        )
 
-        with open(vectorizer_path, 'rb') as f:
-            vectorizer = pickle.load(f)
+        # Create tokenizer plugin
+        tokenizer_plugin = registry.create(tokenizer, locale=locale)
+
+        # Create and load feature extractor plugin
+        feature_plugin = registry.create(feature_extractor)
+        feature_plugin.load(str(vectorizer_path))
+
+        # Determine which classifier was used from model metadata
+        # For now, we'll infer from the stored metadata or default to svm
+        classifier_type = model.metrics.get("classifier", "svm") if model.metrics else "svm"
+        classifier_plugin = registry.create(classifier_type)
+        classifier_plugin.load(str(model_path))
 
         # Get field classes
         result = await session.execute(
@@ -113,33 +141,33 @@ async def _predict_field_documents_async(
         documents_dir = settings.storage.base_path / str(project_id) / "documents"
         all_docs = DocumentLoader.load_documents_from_directory(str(documents_dir))
 
-        # Filter requested documents
-        docs_to_predict = {doc_id: all_docs[doc_id] for doc_id in document_ids if doc_id in all_docs}
+        # Filter requested documents - convert doc_ids to strings for lookup
+        docs_to_predict = {}
+        for doc_id in document_ids:
+            doc_key = str(doc_id)
+            if doc_key in all_docs:
+                docs_to_predict[doc_id] = all_docs[doc_key]
 
         if not docs_to_predict:
             raise ValueError("No valid documents found for prediction")
 
         logger.info(f"Predicting {len(docs_to_predict)} documents")
 
-        # Make predictions
+        # Make predictions using plugins
         texts = list(docs_to_predict.values())
-        doc_ids = list(docs_to_predict.keys())
+        doc_ids_list = list(docs_to_predict.keys())
 
-        X = vectorizer.transform(texts)
-        predicted_classes = classifier.predict(X)
+        # Tokenize documents
+        logger.info("Tokenizing documents...")
+        tokenized_docs = [tokenizer_plugin.tokenize(text) for text in texts]
 
-        # Get prediction probabilities for confidence
-        if hasattr(classifier, 'predict_proba'):
-            confidences = classifier.predict_proba(X).max(axis=1)
-        elif hasattr(classifier, 'decision_function'):
-            # For SVM, use decision function
-            decision_values = classifier.decision_function(X)
-            if len(decision_values.shape) > 1:
-                confidences = decision_values.max(axis=1)
-            else:
-                confidences = abs(decision_values)
-        else:
-            confidences = [1.0] * len(predicted_classes)
+        # Transform to feature vectors
+        logger.info("Transforming to feature vectors...")
+        X = feature_plugin.transform(tokenized_docs)
+
+        # Predict
+        logger.info("Running classifier prediction...")
+        predicted_classes, confidences = classifier_plugin.predict(X)
 
         # Store prediction scores to disk
         from ..models import Prediction as PredictionModel
@@ -151,7 +179,7 @@ async def _predict_field_documents_async(
 
         # Write all prediction scores to JSONL file
         with open(predictions_path, 'w', encoding='utf-8') as f:
-            for doc_id, predicted_class, confidence in zip(doc_ids, predicted_classes, confidences):
+            for doc_id, predicted_class, confidence in zip(doc_ids_list, predicted_classes, confidences):
                 class_id = class_name_to_id.get(predicted_class)
                 if class_id:
                     score_entry = {
@@ -174,7 +202,7 @@ async def _predict_field_documents_async(
 
         # Create new predictions (only latest per document per field)
         predictions_created = 0
-        for doc_id, predicted_class, confidence in zip(doc_ids, predicted_classes, confidences):
+        for doc_id, predicted_class, confidence in zip(doc_ids_list, predicted_classes, confidences):
             class_id = class_name_to_id.get(predicted_class)
             if class_id:
                 prediction = Prediction(
@@ -234,9 +262,12 @@ def predict_field_documents_task(self, **kwargs) -> dict:
 
         result = loop.run_until_complete(
             _predict_field_documents_async(
-                input_data.field_id,
-                input_data.project_id,
-                input_data.document_ids
+                field_id=input_data.field_id,
+                project_id=input_data.project_id,
+                document_ids=input_data.document_ids,
+                tokenizer=input_data.tokenizer,
+                feature_extractor=input_data.feature_extractor,
+                locale=input_data.locale,
             )
         )
         return self.validate_output(result).model_dump()

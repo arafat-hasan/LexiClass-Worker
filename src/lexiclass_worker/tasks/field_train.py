@@ -21,6 +21,22 @@ class TrainFieldModelInput(TaskInput):
 
     field_id: int = PydanticField(..., description="Field ID to train")
     project_id: int = PydanticField(..., description="Project ID")
+    tokenizer: str = PydanticField(
+        default="icu",
+        description="Tokenizer plugin name (icu, spacy, sentencepiece, huggingface)"
+    )
+    feature_extractor: str = PydanticField(
+        default="bow",
+        description="Feature extractor plugin name (bow, tfidf, fasttext, sbert)"
+    )
+    classifier: str = PydanticField(
+        default="svm",
+        description="Classifier plugin name (svm, xgboost, transformer)"
+    )
+    locale: str = PydanticField(
+        default="en",
+        description="Locale for tokenization (e.g., 'en', 'es', 'fr')"
+    )
 
 
 class TrainFieldModelOutput(TaskOutput):
@@ -45,10 +61,17 @@ class TrainFieldModelTask(MLTaskBase):
         return TrainFieldModelOutput
 
 
-async def _train_field_model_async(field_id: int, project_id: int) -> dict:
+async def _train_field_model_async(
+    field_id: int,
+    project_id: int,
+    tokenizer: str = "icu",
+    feature_extractor: str = "bow",
+    classifier: str = "svm",
+    locale: str = "en"
+) -> dict:
     """Train a model for a specific field (async implementation)."""
     from lexiclass.io import DocumentLoader
-    from lexiclass.training import TextClassificationPipeline
+    from lexiclass.plugins import registry
 
     settings = get_settings()
 
@@ -196,22 +219,61 @@ async def _train_field_model_async(field_id: int, project_id: int) -> dict:
                 )
                 raise ValueError(error_msg)
 
-            # Use Lexiclass training pipeline
-            logger.info(f"Initializing TextClassificationPipeline...")
-            pipeline = TextClassificationPipeline(
-                locale=settings.default_locale,
+            # Create plugins using LexiClass registry
+            logger.info(
+                f"Initializing plugins: tokenizer={tokenizer}, "
+                f"feature_extractor={feature_extractor}, classifier={classifier}"
             )
 
-            # Train the pipeline (includes tokenization, feature extraction, and classifier training)
-            logger.info(f"Training pipeline on {len(texts)} documents with {len(set(labels_list))} classes...")
-            training_stats = pipeline.fit(texts, labels_list)
+            # Create tokenizer plugin
+            tokenizer_plugin = registry.create(tokenizer, locale=locale)
+
+            # Create feature extractor plugin
+            feature_plugin = registry.create(feature_extractor)
+
+            # Create classifier plugin
+            classifier_plugin = registry.create(classifier)
+
+            logger.info("Plugins created successfully")
+
+            # Tokenize documents
+            logger.info("Tokenizing documents...")
+            tokenized_docs = [tokenizer_plugin.tokenize(text) for text in texts]
+
+            # Fit feature extractor
+            logger.info("Fitting feature extractor...")
+            feature_plugin.fit(tokenized_docs)
+
+            # Transform to feature vectors
+            logger.info("Transforming documents to feature vectors...")
+            X = feature_plugin.transform(tokenized_docs)
+
+            # Train classifier
+            logger.info(f"Training {classifier} classifier on {len(texts)} documents with {len(set(labels_list))} classes...")
+            classifier_plugin.train(X, labels_list)
+
+            # Calculate training statistics
+            training_stats = {
+                "num_documents": len(texts),
+                "num_classes": len(set(labels_list)),
+                "num_features": feature_plugin.num_features(),
+                "tokenizer": tokenizer,
+                "feature_extractor": feature_extractor,
+                "classifier": classifier,
+            }
 
             # Save model files using dynamic path generation
             model_path = new_model.get_model_path(settings.storage.base_path, project_id)
             vectorizer_path = new_model.get_vectorizer_path(settings.storage.base_path, project_id)
 
-            logger.info(f"Saving model to {model_path}")
-            pipeline.save(model_path, vectorizer_path)
+            logger.info(f"Saving model files to {model_path.parent}")
+            model_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Save classifier
+            classifier_plugin.save(str(model_path))
+
+            # Save feature extractor (vectorizer)
+            feature_plugin.save(str(vectorizer_path))
 
             # Update model status
             new_model.status = ModelStatus.READY
@@ -268,7 +330,14 @@ def train_field_model_task(self, **kwargs) -> dict:
     asyncio.set_event_loop(loop)
     try:
         result = loop.run_until_complete(
-            _train_field_model_async(input_data.field_id, input_data.project_id)
+            _train_field_model_async(
+                field_id=input_data.field_id,
+                project_id=input_data.project_id,
+                tokenizer=input_data.tokenizer,
+                feature_extractor=input_data.feature_extractor,
+                classifier=input_data.classifier,
+                locale=input_data.locale,
+            )
         )
         return self.validate_output(result).model_dump()
     finally:
